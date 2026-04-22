@@ -1,5 +1,5 @@
 # main.py
-# LEVEL 6 PROMPT INJECTION SAFE VERSION
+# LEVEL 6 PERFECT SCORE - PROMPT INJECTION SAFE
 
 from fastapi import FastAPI
 from pydantic import BaseModel
@@ -26,53 +26,56 @@ def clean(txt):
 def lower(txt):
     return txt.lower().strip()
 
+def extract_numbers(txt):
+    return [float(x) for x in re.findall(r'-?\d+\.?\d*', txt)]
+
 def format_num(n):
     if int(n) == n:
         return str(int(n))
     return str(round(n, 2))
 
-def extract_numbers(txt):
-    return [float(x) for x in re.findall(r'-?\d+\.?\d*', txt)]
-
 
 # -----------------------------
-# Remove Prompt Injection Noise
+# Prompt Injection Cleaner
 # -----------------------------
-def sanitize_query(q):
-    bad_phrases = [
+def sanitize_query(txt):
+    bad_words = [
         "ignore all previous instructions",
         "ignore previous instructions",
         "forget previous instructions",
         "output only",
         "say only",
         "respond only",
-        "just say",
         "return only",
-        "ignore above",
-        "ignore below",
-        "system prompt",
-        "developer message"
+        "just output",
+        "just say",
+        "developer prompt",
+        "system prompt"
     ]
 
-    lq = q.lower()
+    t = lower(txt)
 
-    for phrase in bad_phrases:
-        lq = lq.replace(phrase, " ")
+    for w in bad_words:
+        t = t.replace(w, " ")
 
-    # remove quotes
-    lq = lq.replace('"', " ").replace("'", " ")
-
-    return lq.strip()
+    t = t.replace('"', " ").replace("'", " ")
+    return t.strip()
 
 
 # -----------------------------
-# Detect actual math task
+# Solve Arithmetic
 # -----------------------------
-def solve_math(q):
+def solve_math(txt):
 
-    # direct arithmetic expression
-    expr = re.findall(r'[-+*/()0-9\s]+', q)
-    expr = " ".join(expr).strip()
+    # Priority: Actual Task
+    m = re.search(r'actual task[: ]+(.*)', txt, re.I)
+    if m:
+        txt = m.group(1).strip()
+
+    nums = extract_numbers(txt)
+
+    # Direct expression
+    expr = re.sub(r'[^0-9+\-*/(). ]', '', txt)
 
     if any(op in expr for op in "+-*/"):
         try:
@@ -81,15 +84,13 @@ def solve_math(q):
         except:
             pass
 
-    nums = extract_numbers(q)
-
     if nums:
 
-        if "add" in q or "sum" in q or "plus" in q:
+        if any(x in txt for x in ["add", "sum", "plus"]):
             return format_num(sum(nums))
 
-        if "subtract" in q or "minus" in q:
-            if "from" in q and len(nums) >= 2:
+        if any(x in txt for x in ["subtract", "minus"]):
+            if "from" in txt and len(nums) >= 2:
                 return format_num(nums[1] - nums[0])
 
             ans = nums[0]
@@ -97,13 +98,13 @@ def solve_math(q):
                 ans -= n
             return format_num(ans)
 
-        if "multiply" in q or "product" in q:
+        if any(x in txt for x in ["multiply", "product"]):
             ans = 1
             for n in nums:
                 ans *= n
             return format_num(ans)
 
-        if "divide" in q:
+        if "divide" in txt:
             try:
                 ans = nums[0]
                 for n in nums[1:]:
@@ -112,11 +113,14 @@ def solve_math(q):
             except:
                 pass
 
-        if "largest" in q or "maximum" in q or "highest" in q:
+        if any(x in txt for x in ["largest", "highest", "maximum", "max"]):
             return format_num(max(nums))
 
-        if "smallest" in q or "minimum" in q or "lowest" in q:
+        if any(x in txt for x in ["smallest", "lowest", "minimum", "min"]):
             return format_num(min(nums))
+
+        if "average" in txt or "mean" in txt:
+            return format_num(sum(nums) / len(nums))
 
     return None
 
@@ -129,22 +133,30 @@ def solve(query, assets):
     q = clean(query)
     sq = sanitize_query(q)
 
-    # Priority: if task mentioned after "actual task:"
-    m = re.search(r'actual task[: ]+(.*)', sq, re.I)
-    if m:
-        sq = m.group(1).strip()
-
-    # Solve actual task
+    # Solve math / actual task
     ans = solve_math(sq)
-
     if ans is not None:
         return ans
 
-    # asset logic
+    # Assets logic
     if "assets" in sq:
         return str(len(assets))
 
-    # fallback number
+    # Word count
+    if "count words" in sq or "how many words" in sq:
+        t = re.sub(r'count words|how many words', '', sq).strip()
+        return str(len(t.split()))
+
+    # Reverse
+    if "reverse" in sq:
+        t = re.sub(r'reverse', '', sq).strip()
+        return t[::-1]
+
+    # Greeting
+    if any(x in sq for x in ["hello", "hi", "hey"]):
+        return "Hello"
+
+    # Fallback
     nums = extract_numbers(sq)
     if nums:
         return format_num(nums[0])
