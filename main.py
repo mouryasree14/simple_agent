@@ -6,6 +6,8 @@ from pydantic import BaseModel
 from typing import List
 import re
 import math
+from functools import reduce
+import operator
 
 app = FastAPI()
 
@@ -37,19 +39,31 @@ def format_num(n):
 
 # -----------------------------
 # Detect Name + Score
-# Alice scored 80, Bob scored 90
+# Example:
+# Alice scored 80
+# Bob got 90
+# 95 by Charlie
 # -----------------------------
 def detect_scores(q):
     patterns = [
-        r'([A-Z][a-zA-Z]+)\s+(?:scored|got|earned|has|had)\s+(\d+)',
-        r'([A-Z][a-zA-Z]+)\s*[:=]\s*(\d+)'
+        r'([A-Z][a-zA-Z]+)\s*(?:scored|got|earned|has|had|is|=)\s*(-?\d+)',
+        r'(-?\d+)\s*(?:by|for)?\s*([A-Z][a-zA-Z]+)'
     ]
 
     results = []
+
     for pat in patterns:
         found = re.findall(pat, q)
-        for name, score in found:
-            results.append((name, int(score)))
+
+        for item in found:
+            if item[0].isdigit() or item[0].startswith("-"):
+                score = int(item[0])
+                name = item[1]
+            else:
+                name = item[0]
+                score = int(item[1])
+
+            results.append((name, score))
 
     return results
 
@@ -57,63 +71,87 @@ def detect_scores(q):
 # -----------------------------
 # Smart Solver
 # -----------------------------
-def solve(query):
+def solve(query, assets):
     q = clean(query)
     lq = lower(query)
 
     # ======================================
-    # 1. SCORE QUESTIONS (MAIN LEVEL 5 CASE)
+    # 1. SCORE QUESTIONS
     # ======================================
     scores = detect_scores(q)
 
     if scores:
-
-        # highest scorer
         if any(x in lq for x in ["highest", "top", "max", "maximum", "winner", "best"]):
             return max(scores, key=lambda x: x[1])[0]
 
-        # lowest scorer
         if any(x in lq for x in ["lowest", "least", "minimum", "worst"]):
             return min(scores, key=lambda x: x[1])[0]
 
-        # compare default
         return max(scores, key=lambda x: x[1])[0]
 
     # ======================================
-    # 2. Largest / Smallest Numbers
+    # 2. NUMBERS
     # ======================================
     nums = extract_numbers(q)
 
     if nums:
+
+        # Largest / Smallest
         if any(x in lq for x in ["largest", "greatest", "highest", "maximum", "max"]):
             return format_num(max(nums))
 
         if any(x in lq for x in ["smallest", "lowest", "minimum", "least", "min"]):
             return format_num(min(nums))
 
-    # ======================================
-    # 3. Sum / Average
-    # ======================================
-    if nums:
-        if any(x in lq for x in ["sum", "total", "add"]):
+        # Sum
+        if any(x in lq for x in ["sum", "total", "add", "plus"]):
             return format_num(sum(nums))
 
-        if "average" in lq or "mean" in lq:
+        # Average
+        if any(x in lq for x in ["average", "mean"]):
             return format_num(sum(nums) / len(nums))
 
-    # ======================================
-    # 4. Product
-    # ======================================
-    if nums and any(x in lq for x in ["multiply", "product"]):
-        ans = 1
-        for n in nums:
-            ans *= n
-        return format_num(ans)
+        # Subtraction
+        if any(x in lq for x in ["subtract", "minus"]):
+            if "from" in lq and len(nums) >= 2:
+                return format_num(nums[1] - nums[0])
+
+            ans = nums[0]
+            for n in nums[1:]:
+                ans -= n
+            return format_num(ans)
+
+        # Product
+        if any(x in lq for x in ["multiply", "product"]):
+            ans = 1
+            for n in nums:
+                ans *= n
+            return format_num(ans)
+
+        # Division
+        if any(x in lq for x in ["divide", "quotient"]):
+            try:
+                ans = nums[0]
+                for n in nums[1:]:
+                    ans /= n
+                return format_num(ans)
+            except:
+                pass
+
+        # Even / Odd
+        n = int(nums[0])
+
+        if "even" in lq:
+            return "Yes" if n % 2 == 0 else "No"
+
+        if "odd" in lq:
+            return "Yes" if n % 2 != 0 else "No"
 
     # ======================================
-    # 5. Direct Arithmetic
+    # 3. Direct Arithmetic
     # ======================================
     expr = re.sub(r'[^0-9+\-*/(). ]', '', q)
+
     if any(op in expr for op in "+-*/"):
         try:
             val = eval(expr)
@@ -122,39 +160,29 @@ def solve(query):
             pass
 
     # ======================================
-    # 6. Even / Odd
-    # ======================================
-    if nums:
-        n = int(nums[0])
-        if "even" in lq:
-            return "Yes" if n % 2 == 0 else "No"
-        if "odd" in lq:
-            return "Yes" if n % 2 else "No"
-
-    # ======================================
-    # 7. Reverse String
+    # 4. Reverse String
     # ======================================
     if "reverse" in lq:
-        text = re.sub(r'reverse', '', q, flags=re.I).strip()
-        return text[::-1]
+        txt = re.sub(r'reverse', '', q, flags=re.I).strip()
+        return txt[::-1]
 
     # ======================================
-    # 8. Count Words
+    # 5. Count Words
     # ======================================
     if "count words" in lq or "how many words" in lq:
         txt = re.sub(r'count words|how many words', '', lq).strip()
         return str(len(txt.split()))
 
     # ======================================
-    # 9. Assets Logic
+    # 6. Assets Handling
     # ======================================
     if "assets" in lq:
-        return str(len([]))
+        return str(len(assets))
 
     # ======================================
-    # 10. Greetings
+    # 7. Greeting
     # ======================================
-    if "hello" in lq:
+    if any(x in lq for x in ["hello", "hi", "hey"]):
         return "Hello"
 
     # ======================================
@@ -163,7 +191,7 @@ def solve(query):
     if nums:
         return format_num(nums[0])
 
-    return q
+    return "I cannot solve this."
 
 
 # -----------------------------
@@ -171,5 +199,5 @@ def solve(query):
 # -----------------------------
 @app.post("/")
 async def root(data: InputData):
-    ans = solve(data.query)
+    ans = solve(data.query, data.assets)
     return {"output": ans}
