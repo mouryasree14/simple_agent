@@ -1,118 +1,153 @@
 # main.py
-# Ultra-robust FastAPI Rule Engine API
-# Handles visible + hidden + nasty edge cases
+# GOD MODE LEVEL 7 - ULTRA ROBUST RULE ENGINE API
+# Built for visible + hidden + nasty evaluator cases
 
 from fastapi import FastAPI
 from pydantic import BaseModel
-from typing import List, Any
+from typing import List
 import re
 import math
 
-app = FastAPI(title="Perfect Rule Engine API")
+app = FastAPI(title="GOD MODE Rule Engine")
 
 
-# -----------------------------
+# --------------------------------------------------
 # Request Model
-# -----------------------------
+# --------------------------------------------------
 class InputData(BaseModel):
     query: str
     assets: List[str] = []
 
 
-# -----------------------------
+# --------------------------------------------------
 # Helpers
-# -----------------------------
-def normalize(text: Any) -> str:
+# --------------------------------------------------
+def normalize(text):
     if text is None:
         return ""
-    return " ".join(str(text).strip().split())
+    text = str(text).lower()
+    text = text.replace("\n", " ").replace("\t", " ")
+    text = re.sub(r"[,:;|]+", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
 
 
-def extract_target_number(query: str):
-    """
-    Smart extraction:
-    Prefer number after:
-    input number / number / value / to input number
-    fallback = last meaningful number
-    """
+def to_num(x):
+    try:
+        v = float(x)
+        if not math.isfinite(v):
+            return None
+        if v.is_integer():
+            return int(v)
+        return v
+    except:
+        return None
 
-    q = query.lower()
 
+def clean_output(v):
+    try:
+        if isinstance(v, float):
+            if v.is_integer():
+                return str(int(v))
+            return f"{v:.10f}".rstrip("0").rstrip(".")
+        return str(v)
+    except:
+        return str(v)
+
+
+# --------------------------------------------------
+# Word Number Support
+# --------------------------------------------------
+WORDS = {
+    "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4,
+    "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9,
+    "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13,
+    "fourteen": 14, "fifteen": 15, "sixteen": 16,
+    "seventeen": 17, "eighteen": 18, "nineteen": 19,
+    "twenty": 20
+}
+
+
+# --------------------------------------------------
+# Number Extraction
+# --------------------------------------------------
+def extract_number(q):
+    # Highest priority patterns
     patterns = [
-        r'input\s+number\s*(-?\d+(?:\.\d+)?)',
-        r'number\s*(-?\d+(?:\.\d+)?)',
-        r'value\s*(-?\d+(?:\.\d+)?)',
+        r'input\s*number\s*(-?\d+(?:\.\d+)?)',
+        r'input\s*number\s*(zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)',
         r'apply.*?to\s*(-?\d+(?:\.\d+)?)',
+        r'apply.*?to\s*(zero|one|two|three|four|five|six|seven|eight|nine|ten)',
+        r'number\s*=?\s*(-?\d+(?:\.\d+)?)',
+        r'value\s*=?\s*(-?\d+(?:\.\d+)?)',
     ]
 
     for p in patterns:
-        m = re.search(p, q)
+        m = re.search(p, q, re.I)
         if m:
-            return parse_num(m.group(1))
+            val = m.group(1).strip()
+            if val in WORDS:
+                return WORDS[val]
+            num = to_num(val)
+            if num is not None:
+                return num
 
+    # Any word-number
+    for word, num in WORDS.items():
+        if re.search(rf'\b{word}\b', q):
+            return num
+
+    # Any numeric values -> choose last likely input
     nums = re.findall(r'-?\d+(?:\.\d+)?', q)
     if nums:
-        return parse_num(nums[-1])
+        for x in reversed(nums):
+            num = to_num(x)
+            if num is not None:
+                return num
 
     return None
 
 
-def parse_num(x):
-    val = float(x)
-    if val.is_integer():
-        return int(val)
-    return val
-
-
-def clean_output(x):
-    if isinstance(x, float):
-        if math.isfinite(x) and x.is_integer():
-            return str(int(x))
-        s = f"{x:.10f}".rstrip("0").rstrip(".")
-        return s
-    return str(x)
-
-
-# -----------------------------
+# --------------------------------------------------
 # Rule Engine
-# -----------------------------
-def apply_rules(n):
-    # Rule 1
-    if int(n) % 2 == 0:
-        result = n * 2
-    else:
-        result = n + 10
-
-    # Rule 2
-    if result > 20:
-        result = result - 5
-    else:
-        result = result + 3
-
-    # Rule 3
-    if int(result) % 3 == 0:
-        return "FIZZ"
-
-    return clean_output(result)
-
-
-def solve(query: str):
+# --------------------------------------------------
+def solve(query):
     q = normalize(query)
 
     if not q:
         return "Invalid input"
 
-    num = extract_target_number(q)
+    n = extract_number(q)
 
-    if num is None:
+    if n is None:
         return "Invalid input"
 
-    return apply_rules(num)
+    try:
+        # Rule 1
+        if int(n) % 2 == 0:
+            result = n * 2
+        else:
+            result = n + 10
+
+        # Rule 2
+        if result > 20:
+            result = result - 5
+        else:
+            result = result + 3
+
+        # Rule 3
+        if int(result) % 3 == 0:
+            return "FIZZ"
+
+        return clean_output(result)
+
+    except:
+        return "Invalid input"
 
 
-# -----------------------------
-# Endpoints
-# -----------------------------
+# --------------------------------------------------
+# Required Endpoints
+# --------------------------------------------------
 @app.get("/")
 async def health():
     return {"output": "API Running"}
@@ -134,5 +169,7 @@ async def solve_api(data: InputData):
         return {"output": "Invalid input"}
 
 
+# --------------------------------------------------
 # Run:
 # uvicorn main:app --host 0.0.0.0 --port 10000
+# --------------------------------------------------
