@@ -169,7 +169,7 @@ def solve(query):
 # -----------------------------
 # API
 # -----------------------------
-@app.post("/v1/answer")
+@app.post("/")
 async def root(data: InputData):
     ans = solve(data.query)
     return {"output": ans}
