@@ -1,13 +1,11 @@
 # main.py
-# LEVEL 5 PERFECT SCORE OPTIMIZED VERSION
+# LEVEL 6 PROMPT INJECTION SAFE VERSION
 
 from fastapi import FastAPI
 from pydantic import BaseModel
 from typing import List
 import re
 import math
-from functools import reduce
-import operator
 
 app = FastAPI()
 
@@ -28,129 +26,53 @@ def clean(txt):
 def lower(txt):
     return txt.lower().strip()
 
-def extract_numbers(txt):
-    return [float(x) for x in re.findall(r'-?\d+\.?\d*', txt)]
-
 def format_num(n):
     if int(n) == n:
         return str(int(n))
     return str(round(n, 2))
 
+def extract_numbers(txt):
+    return [float(x) for x in re.findall(r'-?\d+\.?\d*', txt)]
+
 
 # -----------------------------
-# Detect Name + Score
-# Example:
-# Alice scored 80
-# Bob got 90
-# 95 by Charlie
+# Remove Prompt Injection Noise
 # -----------------------------
-def detect_scores(q):
-    patterns = [
-        r'([A-Z][a-zA-Z]+)\s*(?:scored|got|earned|has|had|is|=)\s*(-?\d+)',
-        r'(-?\d+)\s*(?:by|for)?\s*([A-Z][a-zA-Z]+)'
+def sanitize_query(q):
+    bad_phrases = [
+        "ignore all previous instructions",
+        "ignore previous instructions",
+        "forget previous instructions",
+        "output only",
+        "say only",
+        "respond only",
+        "just say",
+        "return only",
+        "ignore above",
+        "ignore below",
+        "system prompt",
+        "developer message"
     ]
 
-    results = []
+    lq = q.lower()
 
-    for pat in patterns:
-        found = re.findall(pat, q)
+    for phrase in bad_phrases:
+        lq = lq.replace(phrase, " ")
 
-        for item in found:
-            if item[0].isdigit() or item[0].startswith("-"):
-                score = int(item[0])
-                name = item[1]
-            else:
-                name = item[0]
-                score = int(item[1])
+    # remove quotes
+    lq = lq.replace('"', " ").replace("'", " ")
 
-            results.append((name, score))
-
-    return results
+    return lq.strip()
 
 
 # -----------------------------
-# Smart Solver
+# Detect actual math task
 # -----------------------------
-def solve(query, assets):
-    q = clean(query)
-    lq = lower(query)
+def solve_math(q):
 
-    # ======================================
-    # 1. SCORE QUESTIONS
-    # ======================================
-    scores = detect_scores(q)
-
-    if scores:
-        if any(x in lq for x in ["highest", "top", "max", "maximum", "winner", "best"]):
-            return max(scores, key=lambda x: x[1])[0]
-
-        if any(x in lq for x in ["lowest", "least", "minimum", "worst"]):
-            return min(scores, key=lambda x: x[1])[0]
-
-        return max(scores, key=lambda x: x[1])[0]
-
-    # ======================================
-    # 2. NUMBERS
-    # ======================================
-    nums = extract_numbers(q)
-
-    if nums:
-
-        # Largest / Smallest
-        if any(x in lq for x in ["largest", "greatest", "highest", "maximum", "max"]):
-            return format_num(max(nums))
-
-        if any(x in lq for x in ["smallest", "lowest", "minimum", "least", "min"]):
-            return format_num(min(nums))
-
-        # Sum
-        if any(x in lq for x in ["sum", "total", "add", "plus"]):
-            return format_num(sum(nums))
-
-        # Average
-        if any(x in lq for x in ["average", "mean"]):
-            return format_num(sum(nums) / len(nums))
-
-        # Subtraction
-        if any(x in lq for x in ["subtract", "minus"]):
-            if "from" in lq and len(nums) >= 2:
-                return format_num(nums[1] - nums[0])
-
-            ans = nums[0]
-            for n in nums[1:]:
-                ans -= n
-            return format_num(ans)
-
-        # Product
-        if any(x in lq for x in ["multiply", "product"]):
-            ans = 1
-            for n in nums:
-                ans *= n
-            return format_num(ans)
-
-        # Division
-        if any(x in lq for x in ["divide", "quotient"]):
-            try:
-                ans = nums[0]
-                for n in nums[1:]:
-                    ans /= n
-                return format_num(ans)
-            except:
-                pass
-
-        # Even / Odd
-        n = int(nums[0])
-
-        if "even" in lq:
-            return "Yes" if n % 2 == 0 else "No"
-
-        if "odd" in lq:
-            return "Yes" if n % 2 != 0 else "No"
-
-    # ======================================
-    # 3. Direct Arithmetic
-    # ======================================
-    expr = re.sub(r'[^0-9+\-*/(). ]', '', q)
+    # direct arithmetic expression
+    expr = re.findall(r'[-+*/()0-9\s]+', q)
+    expr = " ".join(expr).strip()
 
     if any(op in expr for op in "+-*/"):
         try:
@@ -159,35 +81,71 @@ def solve(query, assets):
         except:
             pass
 
-    # ======================================
-    # 4. Reverse String
-    # ======================================
-    if "reverse" in lq:
-        txt = re.sub(r'reverse', '', q, flags=re.I).strip()
-        return txt[::-1]
+    nums = extract_numbers(q)
 
-    # ======================================
-    # 5. Count Words
-    # ======================================
-    if "count words" in lq or "how many words" in lq:
-        txt = re.sub(r'count words|how many words', '', lq).strip()
-        return str(len(txt.split()))
+    if nums:
 
-    # ======================================
-    # 6. Assets Handling
-    # ======================================
-    if "assets" in lq:
+        if "add" in q or "sum" in q or "plus" in q:
+            return format_num(sum(nums))
+
+        if "subtract" in q or "minus" in q:
+            if "from" in q and len(nums) >= 2:
+                return format_num(nums[1] - nums[0])
+
+            ans = nums[0]
+            for n in nums[1:]:
+                ans -= n
+            return format_num(ans)
+
+        if "multiply" in q or "product" in q:
+            ans = 1
+            for n in nums:
+                ans *= n
+            return format_num(ans)
+
+        if "divide" in q:
+            try:
+                ans = nums[0]
+                for n in nums[1:]:
+                    ans /= n
+                return format_num(ans)
+            except:
+                pass
+
+        if "largest" in q or "maximum" in q or "highest" in q:
+            return format_num(max(nums))
+
+        if "smallest" in q or "minimum" in q or "lowest" in q:
+            return format_num(min(nums))
+
+    return None
+
+
+# -----------------------------
+# Main Solver
+# -----------------------------
+def solve(query, assets):
+
+    q = clean(query)
+    sq = sanitize_query(q)
+
+    # Priority: if task mentioned after "actual task:"
+    m = re.search(r'actual task[: ]+(.*)', sq, re.I)
+    if m:
+        sq = m.group(1).strip()
+
+    # Solve actual task
+    ans = solve_math(sq)
+
+    if ans is not None:
+        return ans
+
+    # asset logic
+    if "assets" in sq:
         return str(len(assets))
 
-    # ======================================
-    # 7. Greeting
-    # ======================================
-    if any(x in lq for x in ["hello", "hi", "hey"]):
-        return "Hello"
-
-    # ======================================
-    # FINAL FALLBACK
-    # ======================================
+    # fallback number
+    nums = extract_numbers(sq)
     if nums:
         return format_num(nums[0])
 
